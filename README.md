@@ -1,44 +1,44 @@
 # FirstSkinChangeLegit
 
-FirstSkinChangeLegit é um projeto experimental de **viewmodel externo para CS2**. Ele captura a imagem exibida na tela, identifica a região ocupada pela arma original, reconstrói o fundo nessa área e desenha outro modelo em uma overlay. O programa não lê nem altera a memória do jogo.
+FirstSkinChangeLegit is an experimental **external viewmodel project for CS2**. It captures the image displayed on screen, identifies the area occupied by the original weapon, reconstructs the background in that area, and draws another model in an overlay. The program does not read or modify game memory.
 
-O resultado visual já é satisfatório: a arma acompanha a cena, recebe luz e reflexos do mapa e, em vários momentos, parece fazer parte do jogo. O principal ponto a melhorar ainda é a **sincronia da máscara** com as animações e os movimentos do viewmodel original. Quando ela se adianta ou atrasa, partes da arma original podem aparecer.
+The visual result is already satisfying: the weapon follows the scene, picks up lighting and reflections from the map, and often looks like part of the game. The main area that still needs improvement is **mask synchronization** with the original viewmodel’s animations and movement. When the mask runs ahead or falls behind, parts of the original weapon may become visible.
 
-## Como funciona
+## How it works
 
-1. Captura os quadros da tela e acompanha os inputs configurados.
-2. Obtém a máscara do viewmodel a partir das gravações de tela verde e, quando disponível, de um modelo de segmentação ONNX.
-3. Usa quadros anteriores e NVIDIA Optical Flow para tentar reconstruir o fundo oculto pela arma. Onde não há informação confiável, aplica o preenchimento alternativo.
-4. Renderiza o modelo escolhido em uma overlay Direct3D 11, com animações, iluminação e reflexos derivados da imagem do jogo.
+1. Captures screen frames and tracks the configured inputs.
+2. Creates a viewmodel mask from green-screen recordings and, when available, an ONNX segmentation model.
+3. Uses previous frames and NVIDIA Optical Flow to try to reconstruct the background hidden by the weapon. Where reliable information is unavailable, it applies an alternative fill method.
+4. Renders the selected model in a Direct3D 11 overlay, with animations, lighting, and reflections derived from the game image.
 
-O menu abre com **HOME** por padrão. Atalhos, resolução, proporção da imagem, barras pretas, posição da arma e outras opções podem ser ajustados nele.
+The menu opens with **HOME** by default. Shortcuts, resolution, aspect ratio, black bars, weapon position, and other options can be adjusted there.
 
-## Estado do projeto
+## Project status
 
-É um protótipo em desenvolvimento, principalmente na sincronização entre captura, máscara e animação. A aparência pode variar conforme resolução, FPS, iluminação, gravação usada para a máscara e configuração dos binds. Não há integração oficial com o CS2.
+This is a prototype under development, particularly with respect to synchronization between capture, masking, and animation. Its appearance may vary depending on resolution, FPS, lighting, the recording used for the mask, and keybind settings. There is no official integration with CS2.
 
-## Compilar e executar
+## Build and run
 
-Requisitos: Windows, Visual Studio 2022 Build Tools com C++, CMake e GPU compatível com Direct3D 11. Os componentes de terceiros usados pelo projeto estão em `native/third_party`, com seus respectivos avisos de licença.
+Requirements: Windows, Visual Studio 2022 Build Tools with C++, CMake, and a Direct3D 11-compatible GPU. The third-party components used by the project are in `native/third_party`, along with their respective license notices.
 
-Execute `native\build.bat`. Depois, inicie `native\build\Release\vmoverlay.exe`. A interface de visualização no navegador pode ser aberta com `abrir.bat`.
+Run `native\build.bat`. Then launch `native\build\Release\vmoverlay.exe`. The browser-based preview interface can be opened with `abrir.bat`.
 
-O ZIP público contém **apenas código e dependências de terceiros**. Ele não inclui modelos, texturas, animações, capturas, máscaras, gravações ou pesos de IA do jogo. Para ver um viewmodel, forneça arquivos que você tenha direito de usar nos diretórios esperados pelo código (`models/view`, `models/gloves`, `models/cs2vm` e `textures`). Os catálogos `native/skins.tsv` e `skins.json` começam vazios no pacote público.
+The public ZIP contains **only code and third-party dependencies**. It does not include game models, textures, animations, captures, masks, recordings, or AI weights. To display a viewmodel, provide files you have the right to use in the directories expected by the code (`models/view`, `models/gloves`, `models/cs2vm`, and `textures`). The `native/skins.tsv` and `skins.json` catalogs are empty in the public package.
 
-### Fontes usadas durante o desenvolvimento
+### Sources used during development
 
-O histórico de desenvolvimento registra estas origens para os assets usados na versão local:
+The development history records these sources for assets used in the local version:
 
-- [CS2 Spraylab](https://spraylab.pages.dev/): viewmodels em `models/view`, luvas em `models/gloves`, texturas em `textures/cosmetics` e dados usados no catálogo de skins.
-- [AstraStrike](https://astrastrike.fun/): animações de viewmodel usadas em `models/cs2vm`.
+- [CS2 Spraylab](https://spraylab.pages.dev/): viewmodels in `models/view`, gloves in `models/gloves`, textures in `textures/cosmetics`, and data used in the skin catalog.
+- [AstraStrike](https://astrastrike.fun/): viewmodel animations used in `models/cs2vm`.
 
-Esses arquivos **não acompanham este repositório**. A indicação das fontes não concede licença para baixar, usar ou redistribuir os assets; confira as permissões aplicáveis antes de utilizá-los. FirstSkinChangeLegit não tem ligação oficial com a Valve, o CS2 ou esses sites.
+These files **are not included in this repository**. Listing their sources does not grant permission to download, use, or redistribute the assets; check the applicable permissions before using them. FirstSkinChangeLegit is not officially affiliated with Valve, CS2, or these websites.
 
-## Capturas
+## Screenshots
 
-Imagens de funcionamento sem redistribuir os arquivos de modelo e textura.<br>
+Images showing the project in action without redistributing model or texture files.<br>
 https://github.com/user-attachments/assets/11235c22-39e0-4a5f-b5a5-4876e8672f0b
 
-## Licenças
+## Licenses
 
-Os avisos das bibliotecas de terceiros acompanham seus arquivos. A licença do código próprio do projeto ainda precisa ser definida antes da publicação.
+License notices for third-party libraries are included with their files. A license for the project’s original code still needs to be chosen before publication.
