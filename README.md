@@ -36,7 +36,8 @@ Esses arquivos **não acompanham este repositório**. A indicação das fontes n
 
 ## Capturas
 
-Imagens de funcionamento podem ser adicionadas aqui sem redistribuir os arquivos de modelo e textura.
+Imagens de funcionamento sem redistribuir os arquivos de modelo e textura.
+https://github.com/user-attachments/assets/11235c22-39e0-4a5f-b5a5-4876e8672f0b
 
 ## Licenças
 
