@@ -1,0 +1,6 @@
+# Install torch first with the index URL for your GPU (see setup.ps1). CPU-only also works.
+torch
+onnx
+onnxruntime
+pillow
+numpy

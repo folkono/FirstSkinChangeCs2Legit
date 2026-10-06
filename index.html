@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Viewmodels</title>
+<style>
+  :root { --bg:#0b0f15; --panel:rgba(14,19,27,.82); --line:rgba(255,255,255,.08); --text:#dfe6ee; --dim:#7d8896; --accent:#e8a33d; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#000; color:var(--text); font:14px/1.3 system-ui, sans-serif; user-select:none; }
+  /* gradient lives on the canvas so a letterboxed 4:3 leaves true black bars */
+  canvas { display:block; position:fixed; inset:0; margin:auto; width:100%; height:100%; background: radial-gradient(ellipse at 50% 40%, #1b2430 0%, var(--bg) 70%); }
+  #view { margin-top:10px; display:flex; flex-direction:column; gap:6px; width:230px; }
+  #view label { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
+  #view input { flex:1; min-width:0; accent-color:var(--accent); }
+  #view output { color:var(--text); min-width:3ch; text-align:right; }
+  .ui { position:fixed; z-index:1; }
+  #pickbar { left:50%; bottom:16px; transform:translateX(-50%); display:flex; gap:6px; flex-wrap:wrap; justify-content:center; width:min(760px, calc(100% - 32px)); }
+  #pickbar select { flex:1 1 200px; min-width:0; }
+  #anims { right:16px; top:16px; display:flex; flex-direction:column; gap:4px; max-height:calc(100% - 100px); overflow:auto; }
+  #title { left:16px; top:16px; }
+  #title b { color:var(--accent); letter-spacing:.06em; }
+  #title p { margin:6px 0 0; color:var(--dim); font-size:12px; line-height:1.6; }
+  button, select { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; cursor:pointer; text-align:left; backdrop-filter: blur(6px); }
+  option, optgroup { background:#141a22; }
+  button:hover, select:hover { border-color:rgba(255,255,255,.25); }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  #loading { left:50%; top:50%; transform:translate(-50%,-50%); color:var(--dim); }
+  @media (max-width: 640px) {
+    #title p { display:none; }
+    #anims { top:auto; left:16px; right:16px; bottom:112px; flex-direction:row; overflow-x:auto; }
+    #pickbar select { flex-basis:140px; }
+    button { padding:7px 10px; white-space:nowrap; flex:none; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/addons/"
+} }
+</script>
+</head>
+<body>
+<div id="title" class="ui"><b>VIEWMODELS</b>
+  <p>M1 atirar / golpe · M2 alternativo<br>R recarregar · F inspecionar · Q arma anterior<br>WASD mover a luz</p>
+  <div id="view">
+    <label title="viewmodel_fov (CS2 aceita 54–68)">FOV <input id="fov" type="range" min="40" max="110" value="68" aria-label="FOV do viewmodel"><output>68</output></label>
+    <label title="viewmodel_offset_x: direita/esquerda">X <input id="ox" type="range" min="-2.5" max="2.5" step="0.1" value="2.5" aria-label="viewmodel_offset_x"><output>2.5</output></label>
+    <label title="viewmodel_offset_y: frente/trás">Y <input id="oy" type="range" min="-2" max="2" step="0.1" value="0" aria-label="viewmodel_offset_y"><output>0</output></label>
+    <label title="viewmodel_offset_z: cima/baixo">Z <input id="oz" type="range" min="-2" max="2" step="0.1" value="-1.5" aria-label="viewmodel_offset_z"><output>-1.5</output></label>
+    <select id="res" aria-label="Resolução">
+      <option value="">Resolução nativa</option>
+      <option value="1280x960">1280×960 · 4:3 esticado</option>
+      <option value="1024x768">1024×768 · 4:3 esticado</option>
+      <option value="1440x1080">1440×1080 · 4:3 esticado</option>
+      <option value="800x600">800×600 · 4:3 esticado</option>
+      <option value="1280x1024">1280×1024 · 5:4 esticado</option>
+      <option value="1680x1050">1680×1050 · 16:10 esticado</option>
+      <option value="1280x960b">1280×960 · 4:3 barras pretas</option>
+      <option value="1920x1080">1920×1080 · 16:9</option>
+    </select>
+  </div></div>
+<div id="anims" class="ui"></div>
+<div id="pickbar" class="ui">
+  <select id="pick" aria-label="Arma"></select>
+  <select id="skin" aria-label="Skin"></select>
+  <select id="glove" aria-label="Luvas"></select>
+</div>
+<div id="loading" class="ui">Carregando…</div>
+
+<script>
+  // never sit on "Carregando…" silently: first error wins the label
+  function fail(msg) {
+    const l = document.getElementById('loading');
+    if (l.dataset.err) return;
+    l.dataset.err = 1; l.hidden = false; l.style.color = '#ff8a7a'; l.textContent = msg;
+  }
+  if (!/^https?:$/.test(location.protocol)) fail('Abra pelo servidor: rode abrir.bat e use http://localhost:8791');
+  addEventListener('error', e => fail('Erro: ' + e.message));
+  addEventListener('unhandledrejection', e => fail('Erro: ' + (e.reason?.message ?? e.reason)));
+</script>
+<script type="module" onerror="fail('Não carregou o three.js (pasta vendor).')">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// --- catalog. "file" = self-contained viewmodel (arms + sleeves + weapon + clips in one GLB).
+// "model"+"anims" = view GLB whose bones are driven by one GLB per clip through the shared CS2 vm rig (more knife clips).
+const NAMES = {
+  ak47: 'AK-47', m4a4: 'M4A4', m4a1s: 'M4A1-S', famas: 'FAMAS', galil: 'Galil AR', aug: 'AUG', sg553: 'SG 553',
+  awp: 'AWP', ssg08: 'SSG 08', scar20: 'SCAR-20', g3sg1: 'G3SG1',
+  mp9: 'MP9', mac10: 'MAC-10', mp7: 'MP7', mp5sd: 'MP5-SD', ump45: 'UMP-45', p90: 'P90', bizon: 'PP-Bizon',
+  m249: 'M249', negev: 'Negev',
+  glock: 'Glock-18', usp: 'USP-S', hkp2000: 'P2000', p250: 'P250', fiveseven: 'Five-SeveN', tec9: 'Tec-9',
+  cz75a: 'CZ75-Auto', deagle: 'Desert Eagle', revolver: 'R8 Revolver', elite: 'Dual Berettas',
+  knife: 'Faca CT', 'knife-default-t': 'Faca T',
+};
+const title = k => NAMES[k] ?? k.replace(/^knife-/, '').replace(/(^|-)(\w)/g, (_, s, c) => (s && ' ') + c.toUpperCase());
+const knifeClips = k => ({
+  draw: `draw_${k}`, idle: `idle1_${k}`, inspect: `lookat01_${k}`,
+  light_miss1: `light_miss1_${k}`, light_miss2: `light_miss2_${k}`, light_hit1: `light_hit1_${k}`, light_hit2: `light_hit2_${k}`,
+  light_backstab: `light_backstab_${k}`, heavy_miss1: `heavy_miss1_${k}`, heavy_hit1: `heavy_hit1_${k}`, heavy_backstab: `heavy_backstab_${k}`,
+});
+const E = {};
+const group = (name, keys, f) => keys.split(' ').forEach(k => (E[k] = { group: name, ...f(k) }));
+const view = auto => k => ({ label: title(k), file: `models/view/view-${k}.glb`, auto });
+group('Rifles', 'ak47 m4a4 m4a1s famas galil aug sg553', view(true));
+group('Snipers', 'awp ssg08 scar20 g3sg1', view(false));
+group('SMGs', 'mp9 mac10 mp7 mp5sd ump45 p90 bizon', view(true));
+group('Pesadas', 'm249 negev', view(true));
+group('Pistolas', 'glock usp hkp2000 p250 fiveseven tec9 cz75a deagle revolver elite', view(false));
+group('Facas', 'knife knife-default-t knife-karambit knife-butterfly knife-m9-bayonet knife-bayonet knife-flip knife-gut knife-huntsman knife-falchion knife-bowie knife-shadow-daggers knife-navaja knife-stiletto knife-talon knife-ursus knife-classic knife-paracord knife-survival knife-nomad knife-skeleton knife-kukri', k => ({ ...view(false)(k), knife: true }));
+// full view GLB (arms + sleeves + knife) with its own clips ignored: every bone is driven by the astrastrike clip set instead
+const RIG_VIEW = { karambit: 'knife-karambit', butterfly: 'knife-butterfly', knife_ct: 'knife', knife_t: 'knife-default-t' };
+group('Facas · golpes completos', Object.keys(RIG_VIEW).join(' '), k => ({
+  label: `${title(RIG_VIEW[k])} (golpes)`, model: `models/view/view-${RIG_VIEW[k]}.glb`, anims: knifeClips(k), knife: true, skins: RIG_VIEW[k],
+}));
+// legacy meshes: never in the picker, loaded only when a skin painted for the old UVs asks for them
+for (const k of 'sg553 aug mp7 mp5sd ump45 bizon m249 negev cz75a hkp2000 elite fiveseven revolver g3sg1 scar20'.split(' '))
+  E[`${k}-legacy`] = { ...E[k], file: `models/view/view-${k}-legacy.glb`, hidden: true };
+const GLOVES = 'bloodhound-charred brokenfang-jade driver-crimson hydra-case-hardened moto-spearmint specialist-kimono sport-superconductor wraps-slaughter'.split(' ');
+
+// --- scene: Source viewmodel space is X fwd / Y left / Z up; the exported root rotation maps that to +Z fwd / +X left / +Y up
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.32;
+const sun = new THREE.DirectionalLight(0xfff2dd, 2);
+sun.position.set(2, 4, -2); // above, behind-left of the camera
+scene.add(sun, new THREE.HemisphereLight(0xffffff, 0x66675b, 1.4));
+const camera = new THREE.PerspectiveCamera(54, 1, 0.01, 10);
+camera.rotation.y = Math.PI; // look down +Z
+const vm = new THREE.Group();
+scene.add(vm);
+
+const loader = new GLTFLoader();
+const load = url => loader.loadAsync(url);
+const noCull = root => root.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
+
+// Copy world transforms from the animated rig onto same-named bones of a mesh model.
+// Hierarchies differ (CS2 vm skeleton vs model skeleton), so match in world space; unmatched bones (twists) ride their parent.
+const _m = new THREE.Matrix4();
+function pairsFor(model, rig) {
+  const pairs = [];
+  model.traverse(o => { if (o.isBone) { const s = rig.getObjectByName(o.name); if (s) pairs.push([o, s]); } });
+  return pairs;
+}
+function retarget(pairs) {
+  for (const [dst, src] of pairs) {
+    _m.copy(dst.parent.matrixWorld).invert().multiply(src.matrixWorld);
+    _m.decompose(dst.position, dst.quaternion, dst.scale);
+    dst.updateMatrixWorld(true);
+  }
+}
+
+async function build(W) {
+  if (W.file) {
+    const g = await load(W.file);
+    W.model = g.scene;
+    W.clips = Object.fromEntries(g.animations.map(c => [c.name, c]));
+    W.mixer = new THREE.AnimationMixer(W.model);
+    W.pairs = [];
+  } else {
+    const names = Object.entries(W.anims);
+    const [model, ...anims] = await Promise.all([load(W.model), ...names.map(([, f]) => load(`models/cs2vm/${f}.glb`))]);
+    const rig = anims[0].scene; // skeleton nodes only; reuse the first anim file's scene as the shared rig
+    rig.traverse(o => { if (o.isMesh) o.visible = false; });
+    // weapon skeleton rides the vm "wpn" bone; undo its own root conversion so it lands in wpn space
+    const wroot = rig.getObjectByName('weapon').parent;
+    rig.getObjectByName('wpn').add(wroot);
+    wroot.quaternion.set(0.5, 0.5, 0.5, 0.5);
+    W.clips = Object.fromEntries(names.map(([k], i) => [k, anims[i].animations[0]]));
+    W.mixer = new THREE.AnimationMixer(rig);
+    W.model = model.scene;
+    W.pairs = pairsFor(W.model, rig);
+    vm.add(rig);
+  }
+  // single-pose clips would divide by zero in LoopRepeat
+  for (const c of Object.values(W.clips)) if (c.duration === 0) c.duration = 1;
+  W.mixer.addEventListener('finished', e => { if (e.action === W.current) play('idle'); });
+  W.model.visible = false;
+  noCull(W.model);
+  vm.add(W.model);
+}
+
+// --- skins (catalog + compositing ported from spraylab: knife = paint inside the red-channel mask, gun = albedo or tinted pattern)
+const SKINS = await (await fetch('skins.json')).json();
+const texCache = new Map();
+function tex(url, colorSpace, repeat) {
+  const key = `${url}|${colorSpace}|${repeat}`;
+  if (!texCache.has(key)) texCache.set(key, new THREE.TextureLoader().loadAsync(url).then(t => {
+    t.flipY = false;
+    t.colorSpace = colorSpace;
+    if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }));
+  return texCache.get(key);
+}
+const isPaintMesh = o => o.isMesh && /weapon|body_hd|body_legacy/i.test(o.name) && !/firstperson|glove|sleeve/i.test(o.name);
+
+function skinMaterial(base, s, pattern, mask) {
+  const m = base.clone();
+  const cols = (s.colors ?? []).filter(c => c.length >= 3 && c.slice(0, 3).every(Number.isFinite));
+  const albedo = s.style === undefined || s.style === 7 || s.style === 9;
+  if (mask) {
+    const col = i => new THREE.Color().setRGB(...(cols[i] ?? cols[0] ?? [1, 1, 1]).slice(0, 3), THREE.SRGBColorSpace);
+    const paint = !pattern || s.style === 1 ? 'kc0' : cols.length && !albedo ? 'mix(mix(mix(kc0, kc1, kp.r), kc2, kp.g), kc3, kp.b)' : 'kp.rgb';
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, {
+        kPattern: { value: pattern ?? mask }, kMask: { value: mask }, kScale: { value: s.patternScale ?? 1 },
+        kRot: { value: (s.patternRotation ?? 0) * Math.PI / 180 }, kOff: { value: new THREE.Vector2(...(s.patternOffset ?? [0, 0])) },
+        kc0: { value: col(0) }, kc1: { value: col(1) }, kc2: { value: col(2) }, kc3: { value: col(3) }, kRough: { value: s.paintRoughness ?? 0.3 },
+      });
+      sh.vertexShader = 'varying vec2 vKUv;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvKUv = uv;');
+      sh.fragmentShader = 'uniform sampler2D kPattern, kMask; uniform float kScale, kRot, kRough; uniform vec2 kOff; uniform vec3 kc0, kc1, kc2, kc3; varying vec2 vKUv;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `#include <map_fragment>
+float kCov = texture2D(kMask, vKUv).r;
+vec2 kUv = mat2(cos(kRot), -sin(kRot), sin(kRot), cos(kRot)) * ((vKUv - 0.5) * kScale) + 0.5 + kOff;
+vec4 kp = texture2D(kPattern, kUv);
+diffuseColor.rgb = mix(diffuseColor.rgb, ${paint}, kCov);`)
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, kRough, kCov);')
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.9, kCov);');
+    };
+    m.customProgramCacheKey = () => `knife|${paint}`;
+  } else if (albedo && pattern) {
+    m.map = pattern;
+    m.color.set(0xffffff);
+  } else if (!pattern) {
+    if (cols[0]) m.color.setRGB(...cols[0].slice(0, 3));
+  } else {
+    const c0 = cols[0] ?? [1, 1, 1], c1 = cols[1] ?? c0;
+    const tint = cols.length ? 'mix(cc0, cc1, texture2D(cPattern, vMapUv * cScale).r)' : 'texture2D(cPattern, vMapUv * cScale).rgb';
+    m.map = pattern;
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, { cPattern: { value: pattern }, cc0: { value: new THREE.Color(...c0.slice(0, 3)) }, cc1: { value: new THREE.Color(...c1.slice(0, 3)) }, cScale: { value: s.patternScale ?? 1 } });
+      sh.fragmentShader = 'uniform sampler2D cPattern; uniform vec3 cc0, cc1; uniform float cScale;\n' + sh.fragmentShader.replace('#include <map_fragment>', `diffuseColor.rgb *= ${tint};`);
+    };
+    m.customProgramCacheKey = () => `paint|${tint}`;
+  }
+  return m;
+}
+
+async function applySkin(W, s) {
+  const knife = !!W.knife;
+  const [pattern, mask] = await Promise.all([
+    s?.map && tex(s.map, knife && s.colors?.length && s.style !== 7 && s.style !== 9 ? THREE.NoColorSpace : THREE.SRGBColorSpace, knife),
+    s && knife && s.paintMaskMap && tex(s.paintMaskMap, THREE.NoColorSpace, false),
+  ]);
+  if (W.skin !== s?.id) return; // superseded while textures loaded
+  W.model.traverse(o => {
+    if (!isPaintMesh(o)) return;
+    const orig = (o.userData.orig ??= o.material);
+    if (o.material !== orig) o.material.dispose();
+    o.material = s ? skinMaterial(orig, s, pattern || null, mask || null) : orig;
+  });
+}
+
+// glove skins: separate skinned mesh, rebound by bone name onto the viewmodel skeleton; default gloves+arms get hidden
+async function applyGloves(W, id) {
+  W.gloveGroup?.removeFromParent();
+  W.gloveGroup = null;
+  W.model.traverse(o => { if (o.isMesh && /firstperson.*(default_gloves|gloves_arms)/i.test(o.name)) o.visible = !id; });
+  if (!id) return;
+  const g = await load(`models/gloves/gloves-${id}.glb`);
+  if (W.glove !== id) return; // superseded while loading
+  const bones = new Map();
+  W.model.traverse(o => { if (o.isBone) bones.set(o.name, o); });
+  const group = new THREE.Group();
+  g.scene.updateMatrixWorld(true);
+  const meshes = [];
+  g.scene.traverse(o => { if (o.isSkinnedMesh) meshes.push(o); });
+  for (const m of meshes) {
+    const bindMatrix = m.bindMatrix.clone();
+    _m.copy(g.scene.matrixWorld).invert().multiply(m.matrixWorld);
+    m.removeFromParent();
+    group.add(m);
+    _m.decompose(m.position, m.quaternion, m.scale);
+    m.bind(new THREE.Skeleton(m.skeleton.bones.map(b => bones.get(b.name)), m.skeleton.boneInverses), bindMatrix);
+    m.frustumCulled = false;
+  }
+  W.model.add(group);
+  W.gloveGroup = group;
+}
+
+let cur, pick, prev, rev = 0, glove = '';
+const chosen = {}; // picker key -> skin id
+const $ = s => document.querySelector(s);
+const skinKey = k => E[k].skins ?? k;
+const skinById = id => SKINS.find(s => s.id === id);
+function play(key) {
+  const W = E[cur], clip = W?.clips?.[key];
+  if (!clip) return;
+  const a = W.mixer.clipAction(clip);
+  a.reset().setLoop(key.startsWith('idle') ? THREE.LoopRepeat : THREE.LoopOnce, Infinity).play();
+  a.clampWhenFinished = true;
+  if (W.current && W.current !== a) W.current.crossFadeTo(a, key.startsWith('draw') ? 0 : 0.1, false);
+  W.current = a;
+  document.querySelectorAll('#anims button').forEach(b => b.classList.toggle('on', b.dataset.k === key));
+}
+// show the picked weapon with its chosen skin + gloves; a skin painted for legacy UVs swaps in the legacy mesh
+async function show() {
+  const r = ++rev, s = skinById(chosen[pick]);
+  const key = s && E[s.assetKey]?.hidden ? s.assetKey : pick, W = E[key];
+  $('#loading').hidden = false;
+  try { await (W.ready ??= build(W)); } catch (err) { W.ready = null; throw err; } // allow retry; global handler shows it
+  if (W.skin !== s?.id) { W.skin = s?.id; await applySkin(W, s); }
+  if (W.glove !== glove) { W.glove = glove; await applyGloves(W, glove); }
+  if (r !== rev) return; // a newer pick won the race
+  $('#loading').hidden = true;
+  if (key === cur) return;
+  if (cur) { E[cur].model.visible = false; E[cur].mixer.stopAllAction(); E[cur].current = null; }
+  cur = key;
+  W.model.visible = true;
+  $('#anims').replaceChildren(...Object.keys(W.clips).map(k => {
+    const b = Object.assign(document.createElement('button'), { textContent: k.replace(/[_-]/g, ' ') });
+    b.dataset.k = k;
+    b.onclick = () => play(k);
+    return b;
+  }));
+  play('draw');
+}
+
+// --- input
+const first = (...ks) => ks.find(k => E[cur]?.clips?.[k]);
+let firing = 0, alt = 0;
+function primary() {
+  alt++;
+  play(first('fire', alt % 2 ? 'fire-left' : 'fire-right', alt % 2 ? 'light_miss1' : 'light_miss2'));
+}
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!cur) return;
+  if (e.button === 2) return play(first('fire-alt', 'heavy_miss1', 'fire-scoped', 'inspect'));
+  primary();
+  if (E[cur].auto) firing = setInterval(primary, 100); // ~600 rpm
+});
+addEventListener('pointerup', () => clearInterval(firing));
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  const k = e.key.toLowerCase();
+  if (k === 'r') play('reload');
+  if (k === 'f') play('inspect');
+  if (k === 'q' && prev) setPick(prev);
+  held.add(k);
+});
+// WASD orbits the sun around the viewmodel while held (A/D around, W/S up/down)
+const held = new Set(), sunOrbit = new THREE.Spherical().setFromVector3(sun.position);
+addEventListener('keyup', e => held.delete(e.key.toLowerCase()));
+addEventListener('blur', () => held.clear());
+function moveSun(dt) {
+  const turn = 1.5 * dt; // rad/s
+  // +X is camera-left here, so growing theta swings the light to the left
+  sunOrbit.theta += ((held.has('a') ? 1 : 0) - (held.has('d') ? 1 : 0)) * turn;
+  sunOrbit.phi = THREE.MathUtils.clamp(sunOrbit.phi + ((held.has('s') ? 1 : 0) - (held.has('w') ? 1 : 0)) * turn, 0.05, Math.PI - 0.05);
+  sun.position.setFromSpherical(sunOrbit);
+}
+
+// pickers
+function setPick(key) {
+  if (pick && pick !== key) prev = pick;
+  pick = key;
+  $('#pick').value = key;
+  const list = SKINS.filter(s => s.assetKey.replace(/-legacy$/, '') === skinKey(key)).sort((a, b) => a.label.localeCompare(b.label));
+  $('#skin').replaceChildren(new Option(list.length ? `Sem skin (${list.length} disponíveis)` : 'Sem skins', ''), ...list.map(s => new Option(s.label.split(' | ').pop(), s.id)));
+  $('#skin').value = chosen[key] ?? '';
+  $('#skin').disabled = !list.length;
+  return show();
+}
+const groups = {};
+for (const [k, W] of Object.entries(E)) {
+  if (W.hidden) continue;
+  groups[W.group] ??= $('#pick').appendChild(Object.assign(document.createElement('optgroup'), { label: W.group }));
+  groups[W.group].append(new Option(W.label, k));
+}
+$('#glove').append(new Option('Luvas padrão', ''), ...GLOVES.map(g => new Option(title(g), g)));
+$('#pick').onchange = e => { setPick(e.target.value); e.target.blur(); };
+$('#skin').onchange = e => { chosen[pick] = e.target.value; show(); e.target.blur(); };
+$('#glove').onchange = e => { glove = e.target.value; show(); e.target.blur(); };
+
+// render resolution: a fixed buffer (e.g. 1280x960) drawn into the full-window canvas gets stretched like a monitor would; "b" = letterbox
+function resize() {
+  const [, w, h, bars] = $('#res').value.match(/^(\d+)x(\d+)(b?)$/) ?? [, innerWidth, innerHeight, ''];
+  const c = renderer.domElement, fit = Math.min(innerWidth / w, innerHeight / h);
+  renderer.setPixelRatio($('#res').value ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.setSize(+w, +h, false);
+  c.style.width = bars ? `${w * fit}px` : '';
+  c.style.height = bars ? `${h * fit}px` : '';
+  camera.aspect = w / h;
+  // viewmodel_fov is horizontal at 4:3: vertical stays fixed when wider (hor+), horizontal stays fixed when narrower (portrait phones)
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad($('#fov').value / 2)) / Math.max(camera.aspect, 4 / 3)));
+  camera.updateProjectionMatrix();
+  // viewmodel_offset in inches, Source axes: x right, y forward, z up (+X is camera-left here)
+  vm.position.set(-$('#ox').value * 0.0254, $('#oz').value * 0.0254, $('#oy').value * 0.0254);
+  viewInputs.forEach(i => { if (i.nextElementSibling) i.nextElementSibling.value = i.value; });
+}
+const viewInputs = [...document.querySelectorAll('#view input, #view select')];
+// per-viewer preference; fine if storage is blocked
+try { for (const [id, v] of Object.entries(JSON.parse(localStorage.view))) if ($('#' + id)) $('#' + id).value = v; } catch {}
+function saveView() { try { localStorage.view = JSON.stringify(Object.fromEntries(viewInputs.map(i => [i.id, i.value]))); } catch {} }
+viewInputs.forEach(i => (i.oninput = () => { resize(); saveView(); }));
+$('#res').onchange = e => e.target.blur();
+addEventListener('resize', resize);
+resize();
+
+setPick('karambit');
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const W = E[cur], dt = Math.min(clock.getDelta(), 0.05); // background tabs pause rAF; a huge delta would skip whole clips
+  moveSun(dt);
+  if (W) {
+    W.mixer.update(dt);
+    vm.updateMatrixWorld(true);
+    retarget(W.pairs);
+  }
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
